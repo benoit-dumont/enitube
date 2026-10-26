@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+
+# Annule les runs obsolètes d'une même branche
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  api:
+    name: API (lint, build, tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: enitube_test
+          MYSQL_USER: enitube
+          MYSQL_PASSWORD: enitube
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    # Clés alignées sur le .env du projet
+    env:
+      NODE_ENV: test
+      MYSQL_BDD: enitube_test
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_USER: enitube
+      MYSQL_PASS: enitube
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_PORT: 3306
+      APP_DEBUG: "false"
+      ALLOWED_ORIGIN: http://localhost:4200
+      PORT: 3000
+      MAILPIT_SMTP_PORT: 1025
+      MAILPIT_UI_PORT: 8025
+      # Hors de ta liste : à garder seulement si env.ts les exige
+      JWT_SECRET: ci-only-secret-not-used-anywhere-else-0123456789
+      JWT_ACCESS_TTL: 15m
+      REFRESH_TTL_DAYS: 7
+      VIDEO_PROVIDER: catalog
+      SMTP_HOST: 127.0.0.1
+      MAIL_FROM: no-reply@enitube.local
+      APP_URL: http://localhost:4200
+      RESET_TOKEN_TTL_MIN: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - name: Migrations
+        run: npm run migrate
+      - name: Tests d'intégration
+        run: npm test
+
+  web:
+    name: Web (lint, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  # Job unique à déclarer comme « required check » dans la protection de branche
+  ci-ok:
+    name: CI OK
+    if: always()
+    needs: [api, web]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Vérifier le résultat des jobs
+        run: |
+          if [ "${{ needs.api.result }}" != "success" ] || [ "${{ needs.web.result }}" != "success" ]; then
+            echo "Un job a échoué"; exit 1
+          fi
