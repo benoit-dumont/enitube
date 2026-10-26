@@ -11,13 +11,14 @@ import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
 import { apiReference } from '@scalar/express-api-reference';
+import authRouter from './routes/auth.js';
 
 import HttpError from './class/HttpError.js';
 import Logger from './lib/Logger/index.js';
 
 const app = express();
 
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '1mb' }));
 
 app.use((_req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', process.env.ALLOWED_ORIGIN ?? '*');
@@ -38,10 +39,12 @@ const openApiSpec = parseYaml(readFileSync(path.join(__dirname, '..', 'openapi.y
 app.get('/openapi.json', (_req, res) => res.json(openApiSpec));
 app.use('/reference', apiReference({ url: '/openapi.json' }));
 
+app.use('/auth', authRouter);
+
 // Error handling centralisé (Express 5 forward automatiquement les rejets de Promise ici)
 const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
   if (error instanceof HttpError) {
-    res.status(error.code).json({ error: error.message });
+    res.status(error.code).json(error.toBody());
     return;
   }
   Logger.error(error);
