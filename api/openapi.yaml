@@ -1,0 +1,270 @@
+openapi: 3.1.0
+info:
+  title: ENITub API
+  version: 0.1.0
+  description: "API d'ENITub (mini-YouTube : recherche, lecture et playlists).
+
+
+    Les erreurs d'authentification renvoient `{ code, message }` : le front traduit via `errors.<CODE>`.
+    Les autres erreurs inattendues (500) renvoient `{ error }`.
+
+
+    Cette version décrit les routes d'authentification implémentées (`feat/api-auth`)."
+servers:
+  - url: http://localhost:3000
+    description: Développement local
+tags:
+  - name: Auth
+    description: Inscription, connexion et profil
+paths:
+  /auth/register:
+    post:
+      tags:
+        - Auth
+      summary: Créer un compte
+      description:
+        Crée l'utilisateur et renvoie directement un access token. L'email est normalisé (minuscules,
+        espaces retirés).
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              username: kwaay
+              email: a@b.fr
+              password: motdepasse123
+      responses:
+        '201':
+          description: Compte créé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description:
+            Corps invalide. `WEAK_PASSWORD` si le mot de passe ne respecte pas la politique,
+            `VALIDATION_ERROR` pour tout autre champ.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                weakPassword:
+                  summary: Mot de passe trop court
+                  value:
+                    code: WEAK_PASSWORD
+                    message: 'password: Mot de passe trop court (10 caractères minimum)'
+                validation:
+                  summary: Email invalide
+                  value:
+                    code: VALIDATION_ERROR
+                    message: 'email: Email invalide'
+        '409':
+          description: Email déjà utilisé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: EMAIL_TAKEN
+                message: This email is already used
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /auth/login:
+    post:
+      tags:
+        - Auth
+      summary: Se connecter
+      description:
+        Renvoie un access token. La réponse est identique pour un email inconnu et pour un
+        mot de passe faux.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: a@b.fr
+              password: motdepasse123
+      responses:
+        '200':
+          description: Connexion réussie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Corps invalide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: VALIDATION_ERROR
+                message: 'email: Email invalide'
+        '401':
+          description: Identifiants invalides
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: INVALID_CREDENTIALS
+                message: Invalid email or password
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /auth/me:
+    get:
+      tags:
+        - Auth
+      summary: Utilisateur connecté
+      description:
+        Renvoie le profil de l'utilisateur porteur du token. `TOKEN_EXPIRED` signale au front
+        qu'il doit rafraîchir sa session.
+      operationId: getMe
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Profil de l'utilisateur
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          description: Token manquant, invalide ou expiré
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                unauthorized:
+                  summary: Token manquant ou invalide
+                  value:
+                    code: UNAUTHORIZED
+                    message: Token manquant
+                expired:
+                  summary: Access token expiré
+                  value:
+                    code: TOKEN_EXPIRED
+                    message: Access token expiré
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token JWT (HS256) renvoyé par `/auth/register` et `/auth/login`.
+  responses:
+    InternalError:
+      description: Erreur interne inattendue
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/LegacyError'
+          example:
+            error: Cannot register. Please try again
+  schemas:
+    RegisterRequest:
+      type: object
+      required:
+        - username
+        - email
+        - password
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 30
+          description: Nom d'affichage
+        email:
+          type: string
+          format: email
+          maxLength: 255
+        password:
+          type: string
+          format: password
+          minLength: 10
+          maxLength: 72
+          description: 10 caractères minimum, 72 octets maximum (limite de bcrypt), aucune règle de composition.
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 255
+        password:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 1024
+    PublicUser:
+      type: object
+      required:
+        - id
+        - username
+        - email
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+    AuthResponse:
+      type: object
+      required:
+        - accessToken
+        - user
+      properties:
+        accessToken:
+          type: string
+          description: JWT d'accès (durée définie par JWT_ACCESS_TTL, 15 min par défaut)
+        user:
+          $ref: '#/components/schemas/PublicUser'
+    MeResponse:
+      type: object
+      required:
+        - user
+      properties:
+        user:
+          $ref: '#/components/schemas/PublicUser'
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Code métier traduit par le front via `errors.<CODE>`
+          enum:
+            - VALIDATION_ERROR
+            - WEAK_PASSWORD
+            - EMAIL_TAKEN
+            - INVALID_CREDENTIALS
+            - UNAUTHORIZED
+            - TOKEN_EXPIRED
+        message:
+          type: string
+          description: Destiné aux logs et au debug, pas à l'affichage
+    LegacyError:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
