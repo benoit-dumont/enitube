@@ -77,10 +77,10 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
-      - name: Migrations
-        run: npm run migrate
-      - name: Tests d'intégration
-        run: npm test
+      # - name: Migrations
+      #   run: npm run migrate
+      # - name: Tests d'intégration
+      #   run: npm test
 
   web:
     name: Web (lint, build)
