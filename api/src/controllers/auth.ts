@@ -6,21 +6,15 @@ import HttpError from '../class/HttpError.js';
 import { env } from '../config/env.js';
 import { loginSchema, parseBody, registerSchema } from '../schemas/auth.js';
 import UserService from '../services/user.js';
-import type { User } from '../models/index.js';
-
+import type { User } from '../models/index.js'; // déjà présent, ne pas toucher
+import type { User as SharedUser } from '@enitube/shared';
 const BCRYPT_COST = 12;
 
 // Hash factice : on compare toujours un hash, même si l'email n'existe pas,
 // pour que le temps de réponse ne révèle pas si le compte existe.
 const DUMMY_HASH = bcrypt.hashSync('dummy-password-for-timing', BCRYPT_COST);
 
-export interface PublicUser {
-  id: string;
-  username: string;
-  email: string;
-}
-
-const toPublicUser = (user: User): PublicUser => ({
+const toPublicUser = (user: User): SharedUser => ({
   id: user.id,
   username: user.username,
   email: user.email,

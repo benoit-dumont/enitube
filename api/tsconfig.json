@@ -1,11 +1,12 @@
 {
   "compilerOptions": {
+    "paths": { "@enitube/shared": ["../shared/index.ts"] },
     "target": "ES2023",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "lib": ["ES2023", "DOM"],
     "outDir": "dist",
-    "rootDir": "src",
+    "rootDir": "..",
 
     "strict": true,
     "noUncheckedIndexedAccess": true,
@@ -25,6 +26,6 @@
     "declaration": false,
     "sourceMap": true
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "../shared/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }
