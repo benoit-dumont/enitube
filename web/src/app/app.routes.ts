@@ -2,16 +2,29 @@ import { Component } from '@angular/core';
 import { Routes } from '@angular/router';
 import { authGuard, guestGuard } from './guards/auth.guard';
 
-// Composants temporaires : à supprimer quand les vraies pages arrivent.
+// Composant temporaire : à supprimer avec feat/web-auth-pages.
 @Component({ template: '<p>Page /auth (temporaire)</p>' })
 class TmpAuth {}
 
-@Component({ template: '<p>Page /search (temporaire)</p>' })
-class TmpSearch {}
-
 export const routes: Routes = [
   { path: 'auth', canActivate: [guestGuard], component: TmpAuth },
-  { path: 'search', canActivate: [authGuard], component: TmpSearch },
-  { path: '', pathMatch: 'full', redirectTo: 'search' },
+  {
+    // Layout protégé : le guard s'applique à toutes les routes enfants.
+    path: '',
+    canActivate: [authGuard],
+    loadComponent: () => import('./layout/main-layout/main-layout').then((m) => m.MainLayout),
+    children: [
+      {
+        path: 'search',
+        loadComponent: () => import('./features/search/search.page').then((m) => m.SearchPage),
+      },
+      {
+        path: 'playlists',
+        loadComponent: () =>
+          import('./features/playlists/playlists.page').then((m) => m.PlaylistsPage),
+      },
+      { path: '', pathMatch: 'full', redirectTo: 'search' },
+    ],
+  },
   { path: '**', redirectTo: 'search' },
 ];
