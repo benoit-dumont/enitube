@@ -26,6 +26,24 @@ export interface MeResponse {
   user: User;
 }
 
+// ── Vidéos ──────────────────────────────────────────────
+
+export interface Video {
+  /** ID YouTube (11 caractères). */
+  id: string;
+  title: string;
+  channel: string;
+  views: number;
+  description: string;
+  thumbnailUrl: string;
+}
+
+export interface VideoSearchResponse {
+  items: Video[];
+  /** Absent sur la dernière page. À renvoyer tel quel en `pageToken`. */
+  nextPageToken?: string;
+}
+
 // ── Erreurs ─────────────────────────────────────────────
 
 export type ErrorCode =
@@ -34,7 +52,8 @@ export type ErrorCode =
   | "WEAK_PASSWORD"
   | "VALIDATION_ERROR"
   | "UNAUTHORIZED"
-  | "TOKEN_EXPIRED";
+  | "TOKEN_EXPIRED"
+  | "VIDEO_NOT_FOUND";
 
 /** Format d'erreur unique renvoyé par l'API. */
 export interface ApiError {
