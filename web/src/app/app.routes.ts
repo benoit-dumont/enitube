@@ -18,6 +18,10 @@ export const routes: Routes = [
         loadComponent: () => import('./features/search/search.page').then((m) => m.SearchPage),
       },
       {
+        path: 'video/:id',
+        loadComponent: () => import('./features/video/video.page').then((m) => m.VideoPage),
+      },
+      {
         path: 'playlists',
         loadComponent: () =>
           import('./features/playlists/playlists.page').then((m) => m.PlaylistsPage),
