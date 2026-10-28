@@ -9,13 +9,15 @@ info:
     Les autres erreurs inattendues (500) renvoient `{ error }`.
 
 
-    Cette version décrit les routes d'authentification implémentées (`feat/api-auth`)."
+    Cette version décrit les routes d'authentification (`feat/api-auth`) et de vidéos (`feat/api-videos`)."
 servers:
   - url: http://localhost:3000
     description: Développement local
 tags:
   - name: Auth
     description: Inscription, connexion et profil
+  - name: Videos
+    description: Recherche et détail de vidéos (catalogue local ou YouTube selon `VIDEO_PROVIDER`)
 paths:
   /auth/register:
     post:
@@ -155,6 +157,100 @@ paths:
                     message: Access token expiré
         '500':
           $ref: '#/components/responses/InternalError'
+  /videos/search:
+    get:
+      tags:
+        - Videos
+      summary: Rechercher des vidéos
+      description: 'Recherche paginée (12 résultats par page). Tous les mots saisis doivent être présents (titre, chaîne ou description), sans tenir compte de la casse ni des accents. Un résultat vide renvoie un statut 200 avec `items` vide.'
+      operationId: searchVideos
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+        - name: pageToken
+          in: query
+          required: false
+          description: Valeur de `nextPageToken` de la page précédente, à renvoyer telle quelle.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Page de résultats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoSearchResponse'
+        '400':
+          description: '`q` manquant ou vide, ou `pageToken` invalide'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: VALIDATION_ERROR
+                message: 'q: Recherche vide'
+        '401':
+          description: Token manquant, invalide ou expiré
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: UNAUTHORIZED
+                message: Token manquant
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /videos/{id}:
+    get:
+      tags:
+        - Videos
+      summary: Détail d'une vidéo
+      description: 'Un ID qui ne respecte pas le format YouTube (11 caractères : lettres, chiffres, `_`, `-`) renvoie directement `VIDEO_NOT_FOUND`, sans interroger le fournisseur.'
+      operationId: getVideo
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID YouTube (11 caractères)
+          schema:
+            type: string
+            pattern: '^[\w-]{11}$'
+      responses:
+        '200':
+          description: La vidéo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Video'
+        '401':
+          description: Token manquant, invalide ou expiré
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: UNAUTHORIZED
+                message: Token manquant
+        '404':
+          description: Vidéo inconnue ou ID mal formé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: VIDEO_NOT_FOUND
+                message: Video not found
+        '500':
+          $ref: '#/components/responses/InternalError'
 components:
   securitySchemes:
     bearerAuth:
@@ -242,6 +338,44 @@ components:
       properties:
         user:
           $ref: '#/components/schemas/PublicUser'
+    Video:
+      type: object
+      required:
+        - id
+        - title
+        - channel
+        - views
+        - description
+        - thumbnailUrl
+      properties:
+        id:
+          type: string
+          pattern: '^[\w-]{11}$'
+          description: ID YouTube
+        title:
+          type: string
+        channel:
+          type: string
+        views:
+          type: integer
+          minimum: 0
+        description:
+          type: string
+        thumbnailUrl:
+          type: string
+          format: uri
+    VideoSearchResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Video'
+        nextPageToken:
+          type: string
+          description: Absent sur la dernière page
     Error:
       type: object
       required:
@@ -258,6 +392,7 @@ components:
             - INVALID_CREDENTIALS
             - UNAUTHORIZED
             - TOKEN_EXPIRED
+            - VIDEO_NOT_FOUND
         message:
           type: string
           description: Destiné aux logs et au debug, pas à l'affichage
