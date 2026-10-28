@@ -19,5 +19,15 @@ const schema = z.object({
 
   JWT_SECRET: z.string().min(32, 'JWT_SECRET doit faire au moins 32 caractères'),
   JWT_ACCESS_TTL: z.string().default('15m'),
+
+  // Source des vidéos : catalogue local (défaut, aucun quota) ou YouTube Data API v3.
+  VIDEO_PROVIDER: z.enum(['catalog', 'youtube']).default('catalog'),
+  YOUTUBE_API_KEY: z.string().trim().optional(),
 });
-export const env = schema.parse(process.env);
+
+const refined = schema.refine((e) => e.VIDEO_PROVIDER !== 'youtube' || !!e.YOUTUBE_API_KEY, {
+  path: ['YOUTUBE_API_KEY'],
+  message: 'YOUTUBE_API_KEY est requise quand VIDEO_PROVIDER=youtube',
+});
+
+export const env = refined.parse(process.env);
