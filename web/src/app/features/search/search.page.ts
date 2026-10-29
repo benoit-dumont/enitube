@@ -13,8 +13,9 @@ import {
   switchMap,
   tap,
 } from 'rxjs';
-import type { VideoSearchResponse } from '@enitube/shared';
+import type { Video, VideoSearchResponse } from '@enitube/shared';
 import type { LoadState } from '../../models/load-state';
+import { PlaylistModal } from '../playlists/playlist-modal/playlist-modal';
 import { VideoService } from '../../services/video.service';
 import { mapSearchError } from './search-errors';
 import { VideoCard } from './video-card';
@@ -27,7 +28,7 @@ interface SearchRequest {
 
 @Component({
   selector: 'app-search-page',
-  imports: [VideoCard],
+  imports: [VideoCard, PlaylistModal],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <h1 class="mb-4 text-xl font-semibold">Rechercher</h1>
@@ -79,7 +80,7 @@ interface SearchRequest {
         </p>
         <ul class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           @for (video of s.data.items; track video.id) {
-            <li><app-video-card [video]="video" /></li>
+            <li><app-video-card [video]="video" (addToPlaylist)="selected.set($event)" /></li>
           }
         </ul>
 
@@ -100,6 +101,10 @@ interface SearchRequest {
         }
       }
     }
+
+    @if (selected(); as video) {
+      <app-playlist-modal [video]="video" (closed)="selected.set(null)" />
+    }
   `,
 })
 export class SearchPage {
@@ -112,6 +117,8 @@ export class SearchPage {
   protected readonly state = signal<LoadState<VideoSearchResponse>>({ status: 'idle' });
   protected readonly loadingMore = signal(false);
   protected readonly loadMoreError = signal<string | null>(null);
+  /** Vidéo en cours d'ajout à une playlist (modal ouverte tant qu'elle est définie). */
+  protected readonly selected = signal<Video | null>(null);
 
   /** Relance explicite (réessayer, ou même recherche soumise deux fois) ou page suivante. */
   private readonly requests$ = new Subject<SearchRequest>();
