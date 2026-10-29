@@ -1,7 +1,7 @@
 import { Sequelize } from '@sequelize/core';
 import { MySqlDialect } from '@sequelize/mysql';
 import Logger from '../lib/Logger/index.js';
-import { User } from './index.js';
+import { User, Video, Playlist, PlaylistVideo } from './index.js';
 
 export const sequelize = new Sequelize({
   dialect: MySqlDialect,
@@ -13,7 +13,7 @@ export const sequelize = new Sequelize({
   // échoue avec une AssertionError interne ("port has not been normalized").
   port: Number(process.env.MYSQL_PORT) || 3306,
   timezone: '+02:00',
-  models: [User],
+  models: [User, Video, Playlist, PlaylistVideo],
   logging: (sql: string) => process.env.APP_DEBUG === 'true' && Logger.debug(sql),
 });
 
