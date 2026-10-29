@@ -4,6 +4,7 @@ import { Subject, of, throwError } from 'rxjs';
 import { HttpErrorResponse } from '@angular/common/http';
 import { describe, expect, it, vi } from 'vitest';
 import type { Video, VideoSearchResponse } from '@enitube/shared';
+import { PlaylistService } from '../../services/playlist.service';
 import { VideoService } from '../../services/video.service';
 import { SearchPage } from './search.page';
 
@@ -16,11 +17,12 @@ const v = (id: string): Video => ({
   thumbnailUrl: `http://x/${id}.jpg`,
 });
 
-async function setup(search: ReturnType<typeof vi.fn>) {
+async function setup(search: ReturnType<typeof vi.fn>, playlists: object = {}) {
   TestBed.configureTestingModule({
     providers: [
       provideRouter([{ path: 'search', component: SearchPage }]),
       { provide: VideoService, useValue: { search } },
+      { provide: PlaylistService, useValue: playlists },
     ],
   });
   const router = TestBed.inject(Router);
@@ -99,5 +101,32 @@ describe('SearchPage', () => {
     fixture.detectChanges();
     expect(el.querySelectorAll('app-video-card').length).toBe(1);
     expect(el.textContent).toContain('tccccccccccc');
+  });
+
+  it('ouvre la modal d’ajout depuis une carte, puis la ferme', async () => {
+    const search = vi.fn().mockReturnValue(of({ items: [v('aaaaaaaaaaa')] }));
+    const list = vi.fn().mockReturnValue(of({ items: [] }));
+    const { fixture, router, el } = await setup(search, { list });
+    await router.navigate([], { queryParams: { q: 'py' } });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(el.querySelector('app-playlist-modal')).toBeNull();
+
+    const add = [...el.querySelectorAll('app-video-card button')].find((b) =>
+      b.textContent?.includes('Ajouter à une playlist'),
+    ) as HTMLButtonElement;
+    add.click();
+    fixture.detectChanges();
+    expect(el.querySelector('app-playlist-modal [role=dialog]')).not.toBeNull();
+    expect(list).toHaveBeenCalled();
+
+    (
+      el.querySelector(
+        'app-playlist-modal button[aria-label="Fermer la fenêtre"]',
+      ) as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    expect(el.querySelector('app-playlist-modal')).toBeNull();
   });
 });

@@ -12,7 +12,7 @@
     "lint:fix": "ng lint --fix"
   },
   "private": true,
-  "packageManager": "npm@11.20.0",
+  "packageManager": "npm@12.2.1",
   "dependencies": {
     "@angular/common": "^22.2.3",
     "@angular/compiler": "^22.2.3",

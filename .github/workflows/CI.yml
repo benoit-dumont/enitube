@@ -83,7 +83,7 @@ jobs:
       #   run: npm test
 
   web:
-    name: Web (lint, build)
+    name: Web (lint, build, tests)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -101,6 +101,7 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+      - run: npm test
 
   # Job unique à déclarer comme « required check » dans la protection de branche
   ci-ok:
