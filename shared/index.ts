@@ -44,6 +44,33 @@ export interface VideoSearchResponse {
   nextPageToken?: string;
 }
 
+// ── Playlists ───────────────────────────────────────────
+
+export interface Playlist {
+  id: string;
+  name: string;
+  /** Date ISO 8601. */
+  createdAt: string;
+  /** Vidéos de la playlist, la plus récemment ajoutée en premier. */
+  videos: Video[];
+}
+
+export interface PlaylistListResponse {
+  items: Playlist[];
+}
+
+export interface CreatePlaylistRequest {
+  name: string;
+}
+
+export interface RenamePlaylistRequest {
+  name: string;
+}
+
+export interface AddVideoRequest {
+  videoId: string;
+}
+
 // ── Erreurs ─────────────────────────────────────────────
 
 export type ErrorCode =
@@ -53,7 +80,10 @@ export type ErrorCode =
   | "VALIDATION_ERROR"
   | "UNAUTHORIZED"
   | "TOKEN_EXPIRED"
-  | "VIDEO_NOT_FOUND";
+  | "VIDEO_NOT_FOUND"
+  | "PLAYLIST_NOT_FOUND"
+  | "PLAYLIST_NAME_TAKEN"
+  | "VIDEO_ALREADY_IN_PLAYLIST";
 
 /** Format d'erreur unique renvoyé par l'API. */
 export interface ApiError {
