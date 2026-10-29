@@ -9,7 +9,7 @@ info:
     Les autres erreurs inattendues (500) renvoient `{ error }`.
 
 
-    Cette version décrit les routes d'authentification (`feat/api-auth`) et de vidéos (`feat/api-videos`)."
+    Cette version décrit les routes d'authentification (`feat/api-auth`), de vidéos (`feat/api-videos`) et de playlists (`feat/api-playlists`)."
 servers:
   - url: http://localhost:3000
     description: Développement local
@@ -18,6 +18,8 @@ tags:
     description: Inscription, connexion et profil
   - name: Videos
     description: Recherche et détail de vidéos (catalogue local ou YouTube selon `VIDEO_PROVIDER`)
+  - name: Playlists
+    description: Playlists de l'utilisateur connecté (toujours filtrées par le `userId` du JWT)
 paths:
   /auth/register:
     post:
@@ -251,6 +253,270 @@ paths:
                 message: Video not found
         '500':
           $ref: '#/components/responses/InternalError'
+  /playlists:
+    get:
+      tags:
+        - Playlists
+      summary: Lister mes playlists
+      description: Renvoie les playlists de l'utilisateur connecté, triées par nom, avec leurs vidéos (la plus récemment ajoutée en premier).
+      operationId: listPlaylists
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Les playlists (tableau vide si aucune)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags:
+        - Playlists
+      summary: Créer une playlist
+      description: Le nom est nettoyé (espaces retirés) et doit être unique pour l'utilisateur (sans tenir compte de la casse).
+      operationId: createPlaylist
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePlaylistRequest'
+            example:
+              name: Rock des années 80
+      responses:
+        '201':
+          description: Playlist créée (sans vidéo)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playlist'
+        '400':
+          description: Nom vide ou trop long (100 caractères max)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: VALIDATION_ERROR
+                message: 'name: Nom vide'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Nom déjà utilisé par une autre playlist de l'utilisateur
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: PLAYLIST_NAME_TAKEN
+                message: You already have a playlist with this name
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /playlists/{id}:
+    patch:
+      tags:
+        - Playlists
+      summary: Renommer une playlist
+      operationId: renamePlaylist
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID de la playlist (UUID). Une valeur qui n'est pas un UUID renvoie `PLAYLIST_NOT_FOUND`.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenamePlaylistRequest'
+            example:
+              name: Rock des années 80
+      responses:
+        '200':
+          description: Playlist renommée (renommer avec le même nom est accepté)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playlist'
+        '400':
+          description: Nom vide ou trop long
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: VALIDATION_ERROR
+                message: 'name: Nom vide'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Playlist inconnue, ou appartenant à un autre utilisateur
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: PLAYLIST_NOT_FOUND
+                message: Playlist not found
+        '409':
+          description: Nom déjà utilisé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: PLAYLIST_NAME_TAKEN
+                message: You already have a playlist with this name
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags:
+        - Playlists
+      summary: Supprimer une playlist
+      description: Supprime la playlist et ses liens vers les vidéos (les snapshots de vidéos restent, ils sont partagés).
+      operationId: deletePlaylist
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID de la playlist (UUID). Une valeur qui n'est pas un UUID renvoie `PLAYLIST_NOT_FOUND`.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Playlist supprimée
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Playlist inconnue, ou appartenant à un autre utilisateur
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: PLAYLIST_NOT_FOUND
+                message: Playlist not found
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /playlists/{id}/videos:
+    post:
+      tags:
+        - Playlists
+      summary: Ajouter une vidéo
+      description: >-
+        Vérifie que la playlist appartient à l'utilisateur, puis que la vidéo existe chez le fournisseur
+        (`VIDEO_PROVIDER`), enregistre un snapshot partagé de la vidéo et la rattache à la playlist, dans une
+        transaction. Une même vidéo ne peut figurer qu'une fois dans une playlist.
+      operationId: addVideoToPlaylist
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID de la playlist (UUID). Une valeur qui n'est pas un UUID renvoie `PLAYLIST_NOT_FOUND`.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddVideoRequest'
+            example:
+              videoId: dQw4w9WgXcQ
+      responses:
+        '201':
+          description: La playlist à jour (vidéos incluses)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playlist'
+        '400':
+          description: Corps invalide (`videoId` absent)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: VALIDATION_ERROR
+                message: 'videoId: Invalid input'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: '`PLAYLIST_NOT_FOUND` (playlist inconnue ou à un autre utilisateur) ou `VIDEO_NOT_FOUND` (ID mal formé ou inconnu du fournisseur)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: VIDEO_NOT_FOUND
+                message: Video not found
+        '409':
+          description: La vidéo est déjà dans la playlist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: VIDEO_ALREADY_IN_PLAYLIST
+                message: This video is already in the playlist
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /playlists/{id}/videos/{videoId}:
+    delete:
+      tags:
+        - Playlists
+      summary: Retirer une vidéo
+      operationId: removeVideoFromPlaylist
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID de la playlist (UUID). Une valeur qui n'est pas un UUID renvoie `PLAYLIST_NOT_FOUND`.
+          schema:
+            type: string
+            format: uuid
+        - name: videoId
+          in: path
+          required: true
+          description: ID YouTube (11 caractères)
+          schema:
+            type: string
+            pattern: '^[\w-]{11}$'
+      responses:
+        '204':
+          description: Vidéo retirée de la playlist
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: "`PLAYLIST_NOT_FOUND` (playlist inconnue ou à un autre utilisateur) ou `VIDEO_NOT_FOUND` (la vidéo n'est pas dans cette playlist)"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: VIDEO_NOT_FOUND
+                message: Video not found
+        '500':
+          $ref: '#/components/responses/InternalError'
 components:
   securitySchemes:
     bearerAuth:
@@ -259,6 +525,15 @@ components:
       bearerFormat: JWT
       description: Access token JWT (HS256) renvoyé par `/auth/register` et `/auth/login`.
   responses:
+    Unauthorized:
+      description: Token manquant, invalide ou expiré
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: UNAUTHORIZED
+            message: Token manquant
     InternalError:
       description: Erreur interne inattendue
       content:
@@ -376,6 +651,65 @@ components:
         nextPageToken:
           type: string
           description: Absent sur la dernière page
+    Playlist:
+      type: object
+      required:
+        - id
+        - name
+        - createdAt
+        - videos
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        createdAt:
+          type: string
+          format: date-time
+        videos:
+          type: array
+          description: La vidéo la plus récemment ajoutée en premier
+          items:
+            $ref: '#/components/schemas/Video'
+    PlaylistListResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Playlist'
+    CreatePlaylistRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+    RenamePlaylistRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+    AddVideoRequest:
+      type: object
+      required:
+        - videoId
+      properties:
+        videoId:
+          type: string
+          pattern: '^[\w-]{11}$'
+          description: ID YouTube (11 caractères)
     Error:
       type: object
       required:
@@ -393,6 +727,9 @@ components:
             - UNAUTHORIZED
             - TOKEN_EXPIRED
             - VIDEO_NOT_FOUND
+            - PLAYLIST_NOT_FOUND
+            - PLAYLIST_NAME_TAKEN
+            - VIDEO_ALREADY_IN_PLAYLIST
         message:
           type: string
           description: Destiné aux logs et au debug, pas à l'affichage

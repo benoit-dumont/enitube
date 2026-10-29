@@ -14,6 +14,7 @@ import { apiReference } from '@scalar/express-api-reference';
 
 import authRouter from './routes/auth.js';
 import videosRouter from './routes/videos.js';
+import playlistsRouter from './routes/playlists.js';
 
 import HttpError from './class/HttpError.js';
 import Logger from './lib/Logger/index.js';
@@ -43,6 +44,7 @@ app.use('/reference', apiReference({ url: '/openapi.json' }));
 
 app.use('/auth', authRouter);
 app.use('/videos', videosRouter);
+app.use('/playlists', playlistsRouter);
 
 // Error handling centralisé (Express 5 forward automatiquement les rejets de Promise ici)
 const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
