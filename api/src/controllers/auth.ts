@@ -28,7 +28,7 @@ const signAccessToken = (userId: string): string =>
   });
 
 export const register = async (body: unknown) => {
-  const { username, email, password } = parseBody(registerSchema, body);
+  const { username, email, password } = parseBody(registerSchema, body, { weakPasswordCode: true });
 
   const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
 

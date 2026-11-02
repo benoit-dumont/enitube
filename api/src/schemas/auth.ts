@@ -24,15 +24,24 @@ export const loginSchema = z.object({
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 
-/** Valide un corps de requête ; WEAK_PASSWORD si le mot de passe est en cause, sinon VALIDATION_ERROR. */
-export function parseBody<T>(schema: z.ZodType<T>, data: unknown): T {
+/**
+ * Valide un corps de requête. VALIDATION_ERROR par défaut ; WEAK_PASSWORD uniquement si
+ * `weakPasswordCode` est activé ET que le champ `password` est en cause (seule l'inscription a une
+ * politique de mot de passe, le login reste en VALIDATION_ERROR, cf. openapi.yaml).
+ */
+export function parseBody<T>(
+  schema: z.ZodType<T>,
+  data: unknown,
+  { weakPasswordCode = false }: { weakPasswordCode?: boolean } = {},
+): T {
   const result = schema.safeParse(data);
   if (result.success) return result.data;
 
   const issues = result.error.issues;
   const message = issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(' | ');
-  const errorCode = issues.some((i) => i.path[0] === 'password')
-    ? 'WEAK_PASSWORD'
-    : 'VALIDATION_ERROR';
+  const errorCode =
+    weakPasswordCode && issues.some((i) => i.path[0] === 'password')
+      ? 'WEAK_PASSWORD'
+      : 'VALIDATION_ERROR';
   throw new HttpError({ code: 400, errorCode, message });
 }
