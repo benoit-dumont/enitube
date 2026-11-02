@@ -78,7 +78,7 @@ describe('playlists', () => {
   });
 
   describe('GET /playlists', () => {
-    it('lists only the user's playlists, sorted by name', async () => {
+    it('lists only the user\'s playlists, sorted by name', async () => {
       const carol = await registerUser(api, 'carol');
       for (const name of ['Zebra', 'Alpha', 'Middle']) await createPlaylist(api, carol.token, name);
 
@@ -285,7 +285,7 @@ describe('playlists', () => {
       assert.equal(res.body.code, 'PLAYLIST_NOT_FOUND');
     });
 
-    it('the same video in two users' playlists: a single snapshot', async () => {
+    it('the same video in two users\' playlists: a single snapshot', async () => {
       const [u1, u2] = await Promise.all([registerUser(api, 'nina'), registerUser(api, 'omar')]);
       const [p1, p2] = await Promise.all([
         createPlaylist(api, u1.token, 'Common'),

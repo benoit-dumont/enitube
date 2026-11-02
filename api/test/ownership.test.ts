@@ -44,7 +44,7 @@ describe('playlist ownership', () => {
       api.request('DELETE', `/playlists/${id}/videos/${VIDEO_A}`, { token }),
   });
 
-  it('Bob can neither rename, delete nor modify Alice's playlist: 404 PLAYLIST_NOT_FOUND', async () => {
+  it('Bob can neither rename, delete nor modify Alice\'s playlist: 404 PLAYLIST_NOT_FOUND', async () => {
     for (const [label, attempt] of Object.entries(attemptsBy(bob.token, playlistId))) {
       const res = await attempt();
       assert.equal(res.status, 404, label);
@@ -52,7 +52,7 @@ describe('playlist ownership', () => {
     }
   });
 
-  it('...and Alice's playlist is strictly untouched', async () => {
+  it('...and Alice\'s playlist is strictly untouched', async () => {
     for (const attempt of Object.values(attemptsBy(bob.token, playlistId))) await attempt();
 
     const playlist = await Playlist.findByPk(playlistId);
@@ -65,7 +65,7 @@ describe('playlist ownership', () => {
     );
   });
 
-  it('someone else's playlist is indistinguishable from a missing one (same response)', async () => {
+  it('someone else\'s playlist is indistinguishable from a missing one (same response)', async () => {
     const foreign = attemptsBy(bob.token, playlistId);
     const missing = attemptsBy(bob.token, UNKNOWN_UUID);
     for (const label of Object.keys(foreign)) {
@@ -151,7 +151,7 @@ describe('playlist ownership', () => {
     assert.deepEqual(await tables(), before);
   });
 
-  it('deleting one's own account cascades to their playlists, not to others'', async () => {
+  it('deleting one\'s own account cascades to their playlists, not to others\'', async () => {
     const carol = await registerUser(api, 'carol');
     const hers = await createPlaylist(api, carol.token, 'Hers');
     await addVideo(api, carol.token, hers.id, VIDEO_A);
