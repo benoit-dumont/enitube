@@ -6,6 +6,7 @@ import { NEVER, of, throwError } from 'rxjs';
 import { describe, expect, it, vi } from 'vitest';
 import type { Playlist, Video } from '@enitube/shared';
 import { PlaylistService } from '../../services/playlist.service';
+import { ToastService } from '../../services/toast.service';
 import { PlaylistsPage } from './playlists.page';
 
 const video = (id: string, title: string): Video => ({
@@ -60,6 +61,8 @@ describe('PlaylistsPage', () => {
   it('affiche un état de chargement', async () => {
     const { el } = await setup({ list: vi.fn().mockReturnValue(NEVER) });
     expect(el.textContent).toContain('Chargement');
+    // Skeleton, pas de texte nu : région annoncée comme occupée.
+    expect(el.querySelector('[role=status][aria-busy=true] .skeleton')).not.toBeNull();
   });
 
   it('affiche un état vide', async () => {
@@ -189,7 +192,7 @@ describe('PlaylistsPage', () => {
     expect(lists[1].textContent).toContain('Titre A');
   });
 
-  it('échec du retrait : la vidéo reste et une alerte s’affiche', async () => {
+  it('échec du retrait : la vidéo reste et un toast d’erreur reste affiché', async () => {
     const { el, click } = await setup({
       list: vi
         .fn()
@@ -199,6 +202,56 @@ describe('PlaylistsPage', () => {
     await click(/Retirer/);
 
     expect(el.textContent).toContain('Titre A');
-    expect(el.querySelector('[role="alert"]')?.textContent).toContain('plus dans la playlist');
+    const toasts = TestBed.inject(ToastService).visible();
+    expect(toasts[0]).toMatchObject({ kind: 'error', durationMs: null });
+    expect(toasts[0].message).toContain('plus dans la playlist');
+  });
+
+  it('retrait réussi : toast avec annulation qui remet la vidéo (vérité serveur)', async () => {
+    const a = video('aaaaaaaaaaa', 'Titre A');
+    const restored = playlist('1', 'Une', [a]);
+    const addVideo = vi.fn().mockReturnValue(of(restored));
+    const { el, click } = await setup({
+      list: vi.fn().mockReturnValue(of({ items: [playlist('1', 'Une', [a])] })),
+      removeVideo: vi.fn().mockReturnValue(of(undefined)),
+      addVideo,
+    });
+    await click(/Retirer/);
+    expect(el.textContent).not.toContain('Titre A');
+
+    const toast = TestBed.inject(ToastService).visible()[0];
+    expect(toast.durationMs).toBe(5000);
+    toast.action?.run();
+    expect(addVideo).toHaveBeenCalledWith('1', 'aaaaaaaaaaa');
+    expect(TestBed.inject(ToastService).visible().at(-1)?.message).toContain('remise');
+  });
+
+  it('crée, renomme, supprime : un toast de succès à chaque fois', async () => {
+    const { el, click, submit } = await setup({
+      list: vi.fn().mockReturnValue(of({ items: [playlist('1', 'Ancien')] })),
+      create: vi.fn().mockReturnValue(of(playlist('2', 'Neuve'))),
+      rename: vi.fn().mockReturnValue(of(playlist('1', 'Nouveau'))),
+      remove: vi.fn().mockReturnValue(of(undefined)),
+    });
+    const messages = () =>
+      TestBed.inject(ToastService)
+        .visible()
+        .map((t) => t.message);
+
+    const form = el.querySelector('form') as HTMLFormElement;
+    (form.querySelector('input') as HTMLInputElement).value = 'Neuve';
+    await submit(form);
+    await click(/Renommer Ancien/);
+    const edit = el.querySelectorAll('form')[1] as HTMLFormElement;
+    (edit.querySelector('input') as HTMLInputElement).value = 'Nouveau';
+    await submit(edit);
+    await click(/^\s*Supprimer Neuve/);
+    await click(/^\s*Supprimer\s*$/, el.querySelector('[role="group"]') as HTMLElement);
+
+    expect(messages()).toEqual([
+      expect.stringContaining('« Neuve » créée'),
+      expect.stringContaining('renommée en « Nouveau »'),
+      expect.stringContaining('« Neuve » supprimée'),
+    ]);
   });
 });
