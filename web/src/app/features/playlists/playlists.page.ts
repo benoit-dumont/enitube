@@ -13,6 +13,7 @@ import { RouterLink } from '@angular/router';
 import type { Playlist } from '@enitube/shared';
 import type { LoadState } from '../../models/load-state';
 import { PlaylistService } from '../../services/playlist.service';
+import { ToastService, UNDO_DURATION_MS } from '../../services/toast.service';
 import { mapPlaylistError } from './playlist-errors';
 
 const byName = (a: Playlist, b: Playlist) => a.name.localeCompare(b.name, 'fr');
@@ -55,26 +56,35 @@ const BTN =
       <p id="new-playlist-error" role="alert" class="mb-2 text-sm text-red-700">{{ msg }}</p>
     }
 
-    @if (actionError(); as msg) {
-      <div
-        role="alert"
-        class="my-4 flex max-w-2xl items-start justify-between gap-3 rounded-md bg-red-50 px-4 py-3 text-sm text-red-700"
-      >
-        <p>{{ msg }}</p>
-        <button
-          type="button"
-          class="font-semibold underline focus-visible:outline-2 focus-visible:outline-red-600"
-          (click)="actionError.set(null)"
-        >
-          Fermer
-        </button>
-      </div>
-    }
-
     <div class="mt-6">
       @if (state(); as s) {
         @if (s.status === 'idle' || s.status === 'loading') {
-          <p role="status" class="text-sm text-slate-600">Chargement de vos playlists…</p>
+          <div role="status" aria-busy="true" class="skeleton-region">
+            <span class="sr-only">Chargement de vos playlists…</span>
+            <ul class="flex max-w-none flex-col gap-6" aria-hidden="true">
+              @for (card of skeletonCards; track card) {
+                <li class="rounded-lg border border-slate-200 bg-white shadow-sm">
+                  <div class="flex items-center justify-between gap-3 p-4">
+                    <div class="flex flex-col gap-1">
+                      <div class="skeleton h-7 w-48 rounded"></div>
+                      <div class="skeleton h-4 w-16 rounded"></div>
+                    </div>
+                    <div class="flex gap-2">
+                      <div class="skeleton h-8 w-24 rounded-md"></div>
+                      <div class="skeleton h-8 w-24 rounded-md"></div>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-3 border-t border-slate-200 p-3">
+                    <div class="skeleton aspect-video w-28 shrink-0 rounded"></div>
+                    <div class="flex flex-1 flex-col gap-1">
+                      <div class="skeleton h-5 w-2/3 rounded"></div>
+                      <div class="skeleton h-4 w-1/4 rounded"></div>
+                    </div>
+                  </div>
+                </li>
+              }
+            </ul>
+          </div>
         } @else if (s.status === 'error') {
           <div role="alert" class="max-w-2xl rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">
             <p>{{ s.message }}</p>
@@ -237,12 +247,13 @@ const BTN =
 export class PlaylistsPage {
   private readonly playlists = inject(PlaylistService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly toast = inject(ToastService);
 
   protected readonly state = signal<LoadState<Playlist[]>>({ status: 'idle' });
   protected readonly creating = signal(false);
   protected readonly createError = signal<string | null>(null);
-  /** Erreur d'une action (suppression, retrait de vidéo) : bannière globale fermable. */
-  protected readonly actionError = signal<string | null>(null);
+  /** Cartes du skeleton de chargement. */
+  protected readonly skeletonCards = [1, 2];
 
   protected readonly editingId = signal<string | null>(null);
   protected readonly renameError = signal<string | null>(null);
@@ -292,6 +303,7 @@ export class PlaylistsPage {
           this.creating.set(false);
           input.value = '';
           this.mutate((items) => sortedByName([...items, created]));
+          this.toast.success(`Playlist « ${created.name} » créée.`);
         },
         error: (error: unknown) => {
           this.creating.set(false);
@@ -335,6 +347,7 @@ export class PlaylistsPage {
           this.mutate((items) =>
             sortedByName(items.map((p) => (p.id === updated.id ? updated : p))),
           );
+          this.toast.success(`Playlist renommée en « ${updated.name} ».`);
         },
         error: (error: unknown) => {
           this.pendingId.set(null);
@@ -349,7 +362,6 @@ export class PlaylistsPage {
   }
 
   protected remove(playlist: Playlist): void {
-    this.actionError.set(null);
     this.pendingId.set(playlist.id);
     this.playlists
       .remove(playlist.id)
@@ -359,17 +371,17 @@ export class PlaylistsPage {
           this.pendingId.set(null);
           this.confirmingId.set(null);
           this.mutate((items) => items.filter((p) => p.id !== playlist.id));
+          this.toast.success(`Playlist « ${playlist.name} » supprimée.`);
         },
         error: (error: unknown) => {
           this.pendingId.set(null);
           this.confirmingId.set(null);
-          this.actionError.set(mapPlaylistError(error));
+          this.toast.error(mapPlaylistError(error));
         },
       });
   }
 
   protected removeVideo(playlist: Playlist, videoId: string): void {
-    this.actionError.set(null);
     this.pendingId.set(playlist.id);
     this.playlists
       .removeVideo(playlist.id, videoId)
@@ -382,12 +394,32 @@ export class PlaylistsPage {
               p.id === playlist.id ? { ...p, videos: p.videos.filter((v) => v.id !== videoId) } : p,
             ),
           );
+          // Action immédiate puis annulation plutôt que confirmation (style.md §8.2).
+          this.toast.info(`Vidéo retirée de « ${playlist.name} ».`, {
+            durationMs: UNDO_DURATION_MS,
+            action: { label: 'Annuler', run: () => this.undoRemoveVideo(playlist, videoId) },
+          });
         },
         error: (error: unknown) => {
           this.pendingId.set(null);
-          this.actionError.set(mapPlaylistError(error));
+          this.toast.error(mapPlaylistError(error));
         },
       });
+  }
+
+  /**
+   * Remet la vidéo retirée. Volontairement non lié à la destruction de la page : l'annulation
+   * doit rester possible après un changement de route. La réponse de l'API (vérité serveur)
+   * remplace la playlist affichée ; la vidéo revient en tête, l'API ordonnant par date d'ajout.
+   */
+  private undoRemoveVideo(playlist: Playlist, videoId: string): void {
+    this.playlists.addVideo(playlist.id, videoId).subscribe({
+      next: (updated) => {
+        this.mutate((items) => items.map((p) => (p.id === updated.id ? updated : p)));
+        this.toast.success(`Vidéo remise dans « ${updated.name} ».`);
+      },
+      error: (error: unknown) => this.toast.error(mapPlaylistError(error)),
+    });
   }
 
   /** Mise à jour immuable de la liste affichée (jamais de push/splice). */
