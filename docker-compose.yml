@@ -1,4 +1,4 @@
-# ENITub : services de développement local (MySQL + Mailpit)
+# ENITub : services de développement local (MySQL + phpMyAdmin + Mailpit)
 # Usage : docker compose up -d
 services:
   mysql:
@@ -14,7 +14,7 @@ services:
       MYSQL_USER: ${MYSQL_USER:-enitube}
       MYSQL_PASSWORD: ${MYSQL_PASS:-enitube}
     ports:
-      - "127.0.0.1:${MYSQL_PORT:-3307}:3307"
+      - "127.0.0.1:${MYSQL_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       # Crée la base de test (<MYSQL_BDD>_test) au premier démarrage
@@ -30,6 +30,41 @@ services:
       retries: 20
       start_period: 20s
 
+  # phpMyAdmin (PHP-FPM) : interface via phpmyadmin-web
+  phpmyadmin:
+    build:
+      context: ./docker/phpmyadmin
+      target: php
+    container_name: enitube-phpmyadmin
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,uid=82,gid=82,size=128m
+    secrets: [pma_blowfish]
+
+  # nginx : http://localhost:8080
+  phpmyadmin-web:
+    build:
+      context: ./docker/phpmyadmin
+      target: web
+    container_name: enitube-phpmyadmin-web
+    restart: unless-stopped
+    depends_on:
+      - phpmyadmin
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    ports:
+      - "127.0.0.1:${PHPMYADMIN_PORT:-8080}:8080"
+
   # Serveur SMTP factice : capte les emails de réinitialisation de mot de passe
   mailpit:
     image: axllent/mailpit:latest
@@ -44,3 +79,6 @@ services:
 
 volumes:
   mysql_data:
+secrets:
+  pma_blowfish:
+    file: ./docker/phpmyadmin/secrets/pma_blowfish

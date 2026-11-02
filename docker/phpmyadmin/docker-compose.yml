@@ -1,0 +1,47 @@
+services:
+  php:
+    build:
+      context: .
+      target: php
+      args:
+        PHP_VERSION: "8.5.12"
+        PMA_VERSION: "5.2.3"
+    image: pma-php:5.2.3-php8.5.12
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID]          # nécessaire à php-fpm pour lancer ses workers en www-data
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,uid=82,gid=82,size=128m
+    secrets: [pma_blowfish]
+    networks: [backend]
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      target: web
+      args:
+        PMA_VERSION: "5.2.3"
+    image: pma-web:5.2.3
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    ports:
+      - "127.0.0.1:8080:8080"          # à publier via votre reverse proxy TLS
+    networks: [front, backend]
+    depends_on: [php]
+    restart: unless-stopped
+
+networks:
+  front: {}
+  backend:
+    internal: true                     # pas d'accès Internet pour PHP
+    # Votre base MySQL/MariaDB doit être joignable depuis ce réseau
+    # (ajoutez-la ici, ou rattachez "php" à un réseau existant sans route vers Internet).
+
+secrets:
+  pma_blowfish:
+    file: ./secrets/pma_blowfish

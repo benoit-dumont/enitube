@@ -66,9 +66,9 @@ jobs:
       RESET_TOKEN_TTL_MIN: 60
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -77,22 +77,20 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
-      - name: Migrations
-        run: npm run migrate
       - name: Tests d'intégration
         run: npm test
 
   web:
-    name: Web (lint, build)
+    name: Web (lint, build, tests)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: web
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -101,6 +99,7 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+      - run: npm test
 
   # Job unique à déclarer comme « required check » dans la protection de branche
   ci-ok:
@@ -114,3 +113,34 @@ jobs:
           if [ "${{ needs.api.result }}" != "success" ] || [ "${{ needs.web.result }}" != "success" ]; then
             echo "Un job a échoué"; exit 1
           fi
+
+  # Publie la doc OpenAPI sur GitHub Pages, uniquement après un push sur main avec une CI verte
+  docs:
+    name: Docs (GitHub Pages)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [ci-ok]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Construire le site
+        run: |
+          mkdir _site
+          cp docs/index.html _site/index.html
+          cp api/openapi.yaml _site/openapi.yaml
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

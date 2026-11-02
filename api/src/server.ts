@@ -1,7 +1,7 @@
 import http from 'node:http';
 import './config.js';
 import app from './app.js';
-import { initDatabase } from './models/index.js';
+import { initDatabase } from './models/db.js';
 import Logger from './lib/Logger/index.js';
 
 interface SyscallError extends Error {

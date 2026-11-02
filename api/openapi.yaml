@@ -1,0 +1,742 @@
+openapi: 3.1.0
+info:
+  title: ENITub API
+  version: 0.1.0
+  description: "API d'ENITub (mini-YouTube : recherche, lecture et playlists).
+
+
+    Les erreurs d'authentification renvoient `{ code, message }` : le front traduit via `errors.<CODE>`.
+    Les autres erreurs inattendues (500) renvoient `{ error }`.
+
+
+    Cette version décrit les routes d'authentification (`feat/api-auth`), de vidéos (`feat/api-videos`) et de playlists (`feat/api-playlists`)."
+servers:
+  - url: http://localhost:3000
+    description: Développement local
+tags:
+  - name: Auth
+    description: Inscription, connexion et profil
+  - name: Videos
+    description: Recherche et détail de vidéos (catalogue local ou YouTube selon `VIDEO_PROVIDER`)
+  - name: Playlists
+    description: Playlists de l'utilisateur connecté (toujours filtrées par le `userId` du JWT)
+paths:
+  /auth/register:
+    post:
+      tags:
+        - Auth
+      summary: Créer un compte
+      description:
+        Crée l'utilisateur et renvoie directement un access token. L'email est normalisé (minuscules,
+        espaces retirés).
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              username: kwaay
+              email: a@b.fr
+              password: motdepasse123
+      responses:
+        '201':
+          description: Compte créé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description:
+            Corps invalide. `WEAK_PASSWORD` si le mot de passe ne respecte pas la politique,
+            `VALIDATION_ERROR` pour tout autre champ.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                weakPassword:
+                  summary: Mot de passe trop court
+                  value:
+                    code: WEAK_PASSWORD
+                    message: 'password: Mot de passe trop court (10 caractères minimum)'
+                validation:
+                  summary: Email invalide
+                  value:
+                    code: VALIDATION_ERROR
+                    message: 'email: Email invalide'
+        '409':
+          description: Email déjà utilisé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: EMAIL_TAKEN
+                message: This email is already used
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /auth/login:
+    post:
+      tags:
+        - Auth
+      summary: Se connecter
+      description:
+        Renvoie un access token. La réponse est identique pour un email inconnu et pour un
+        mot de passe faux.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: a@b.fr
+              password: motdepasse123
+      responses:
+        '200':
+          description: Connexion réussie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Corps invalide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: VALIDATION_ERROR
+                message: 'email: Email invalide'
+        '401':
+          description: Identifiants invalides
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: INVALID_CREDENTIALS
+                message: Invalid email or password
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /auth/me:
+    get:
+      tags:
+        - Auth
+      summary: Utilisateur connecté
+      description:
+        Renvoie le profil de l'utilisateur porteur du token. `TOKEN_EXPIRED` signale au front
+        qu'il doit rafraîchir sa session.
+      operationId: getMe
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Profil de l'utilisateur
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          description: Token manquant, invalide ou expiré
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                unauthorized:
+                  summary: Token manquant ou invalide
+                  value:
+                    code: UNAUTHORIZED
+                    message: Token manquant
+                expired:
+                  summary: Access token expiré
+                  value:
+                    code: TOKEN_EXPIRED
+                    message: Access token expiré
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /videos/search:
+    get:
+      tags:
+        - Videos
+      summary: Rechercher des vidéos
+      description: 'Recherche paginée (12 résultats par page). Tous les mots saisis doivent être présents (titre, chaîne ou description), sans tenir compte de la casse ni des accents. Un résultat vide renvoie un statut 200 avec `items` vide.'
+      operationId: searchVideos
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+        - name: pageToken
+          in: query
+          required: false
+          description: Valeur de `nextPageToken` de la page précédente, à renvoyer telle quelle.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Page de résultats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoSearchResponse'
+        '400':
+          description: '`q` manquant ou vide, ou `pageToken` invalide'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: VALIDATION_ERROR
+                message: 'q: Recherche vide'
+        '401':
+          description: Token manquant, invalide ou expiré
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: UNAUTHORIZED
+                message: Token manquant
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /videos/{id}:
+    get:
+      tags:
+        - Videos
+      summary: Détail d'une vidéo
+      description: 'Un ID qui ne respecte pas le format YouTube (11 caractères : lettres, chiffres, `_`, `-`) renvoie directement `VIDEO_NOT_FOUND`, sans interroger le fournisseur.'
+      operationId: getVideo
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID YouTube (11 caractères)
+          schema:
+            type: string
+            pattern: '^[\w-]{11}$'
+      responses:
+        '200':
+          description: La vidéo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Video'
+        '401':
+          description: Token manquant, invalide ou expiré
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: UNAUTHORIZED
+                message: Token manquant
+        '404':
+          description: Vidéo inconnue ou ID mal formé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: VIDEO_NOT_FOUND
+                message: Video not found
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /playlists:
+    get:
+      tags:
+        - Playlists
+      summary: Lister mes playlists
+      description: Renvoie les playlists de l'utilisateur connecté, triées par nom, avec leurs vidéos (la plus récemment ajoutée en premier).
+      operationId: listPlaylists
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Les playlists (tableau vide si aucune)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags:
+        - Playlists
+      summary: Créer une playlist
+      description: Le nom est nettoyé (espaces retirés) et doit être unique pour l'utilisateur (sans tenir compte de la casse).
+      operationId: createPlaylist
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePlaylistRequest'
+            example:
+              name: Rock des années 80
+      responses:
+        '201':
+          description: Playlist créée (sans vidéo)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playlist'
+        '400':
+          description: Nom vide ou trop long (100 caractères max)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: VALIDATION_ERROR
+                message: 'name: Nom vide'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Nom déjà utilisé par une autre playlist de l'utilisateur
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: PLAYLIST_NAME_TAKEN
+                message: You already have a playlist with this name
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /playlists/{id}:
+    patch:
+      tags:
+        - Playlists
+      summary: Renommer une playlist
+      operationId: renamePlaylist
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID de la playlist (UUID). Une valeur qui n'est pas un UUID renvoie `PLAYLIST_NOT_FOUND`.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenamePlaylistRequest'
+            example:
+              name: Rock des années 80
+      responses:
+        '200':
+          description: Playlist renommée (renommer avec le même nom est accepté)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playlist'
+        '400':
+          description: Nom vide ou trop long
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: VALIDATION_ERROR
+                message: 'name: Nom vide'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Playlist inconnue, ou appartenant à un autre utilisateur
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: PLAYLIST_NOT_FOUND
+                message: Playlist not found
+        '409':
+          description: Nom déjà utilisé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: PLAYLIST_NAME_TAKEN
+                message: You already have a playlist with this name
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags:
+        - Playlists
+      summary: Supprimer une playlist
+      description: Supprime la playlist et ses liens vers les vidéos (les snapshots de vidéos restent, ils sont partagés).
+      operationId: deletePlaylist
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID de la playlist (UUID). Une valeur qui n'est pas un UUID renvoie `PLAYLIST_NOT_FOUND`.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Playlist supprimée
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Playlist inconnue, ou appartenant à un autre utilisateur
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: PLAYLIST_NOT_FOUND
+                message: Playlist not found
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /playlists/{id}/videos:
+    post:
+      tags:
+        - Playlists
+      summary: Ajouter une vidéo
+      description: >-
+        Vérifie que la playlist appartient à l'utilisateur, puis que la vidéo existe chez le fournisseur
+        (`VIDEO_PROVIDER`), enregistre un snapshot partagé de la vidéo et la rattache à la playlist, dans une
+        transaction. Une même vidéo ne peut figurer qu'une fois dans une playlist.
+      operationId: addVideoToPlaylist
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID de la playlist (UUID). Une valeur qui n'est pas un UUID renvoie `PLAYLIST_NOT_FOUND`.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddVideoRequest'
+            example:
+              videoId: dQw4w9WgXcQ
+      responses:
+        '201':
+          description: La playlist à jour (vidéos incluses)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playlist'
+        '400':
+          description: Corps invalide (`videoId` absent)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: VALIDATION_ERROR
+                message: 'videoId: Invalid input'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: '`PLAYLIST_NOT_FOUND` (playlist inconnue ou à un autre utilisateur) ou `VIDEO_NOT_FOUND` (ID mal formé ou inconnu du fournisseur)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: VIDEO_NOT_FOUND
+                message: Video not found
+        '409':
+          description: La vidéo est déjà dans la playlist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: VIDEO_ALREADY_IN_PLAYLIST
+                message: This video is already in the playlist
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /playlists/{id}/videos/{videoId}:
+    delete:
+      tags:
+        - Playlists
+      summary: Retirer une vidéo
+      operationId: removeVideoFromPlaylist
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID de la playlist (UUID). Une valeur qui n'est pas un UUID renvoie `PLAYLIST_NOT_FOUND`.
+          schema:
+            type: string
+            format: uuid
+        - name: videoId
+          in: path
+          required: true
+          description: ID YouTube (11 caractères)
+          schema:
+            type: string
+            pattern: '^[\w-]{11}$'
+      responses:
+        '204':
+          description: Vidéo retirée de la playlist
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: "`PLAYLIST_NOT_FOUND` (playlist inconnue ou à un autre utilisateur) ou `VIDEO_NOT_FOUND` (la vidéo n'est pas dans cette playlist)"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: VIDEO_NOT_FOUND
+                message: Video not found
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token JWT (HS256) renvoyé par `/auth/register` et `/auth/login`.
+  responses:
+    Unauthorized:
+      description: Token manquant, invalide ou expiré
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: UNAUTHORIZED
+            message: Token manquant
+    InternalError:
+      description: Erreur interne inattendue
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/LegacyError'
+          example:
+            error: Cannot register. Please try again
+  schemas:
+    RegisterRequest:
+      type: object
+      required:
+        - username
+        - email
+        - password
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 30
+          description: Nom d'affichage
+        email:
+          type: string
+          format: email
+          maxLength: 255
+        password:
+          type: string
+          format: password
+          minLength: 10
+          maxLength: 72
+          description: 10 caractères minimum, 72 octets maximum (limite de bcrypt), aucune règle de composition.
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 255
+        password:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 1024
+    PublicUser:
+      type: object
+      required:
+        - id
+        - username
+        - email
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+    AuthResponse:
+      type: object
+      required:
+        - accessToken
+        - user
+      properties:
+        accessToken:
+          type: string
+          description: JWT d'accès (durée définie par JWT_ACCESS_TTL, 15 min par défaut)
+        user:
+          $ref: '#/components/schemas/PublicUser'
+    MeResponse:
+      type: object
+      required:
+        - user
+      properties:
+        user:
+          $ref: '#/components/schemas/PublicUser'
+    Video:
+      type: object
+      required:
+        - id
+        - title
+        - channel
+        - views
+        - description
+        - thumbnailUrl
+      properties:
+        id:
+          type: string
+          pattern: '^[\w-]{11}$'
+          description: ID YouTube
+        title:
+          type: string
+        channel:
+          type: string
+        views:
+          type: integer
+          minimum: 0
+        description:
+          type: string
+        thumbnailUrl:
+          type: string
+          format: uri
+    VideoSearchResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Video'
+        nextPageToken:
+          type: string
+          description: Absent sur la dernière page
+    Playlist:
+      type: object
+      required:
+        - id
+        - name
+        - createdAt
+        - videos
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        createdAt:
+          type: string
+          format: date-time
+        videos:
+          type: array
+          description: La vidéo la plus récemment ajoutée en premier
+          items:
+            $ref: '#/components/schemas/Video'
+    PlaylistListResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Playlist'
+    CreatePlaylistRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+    RenamePlaylistRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+    AddVideoRequest:
+      type: object
+      required:
+        - videoId
+      properties:
+        videoId:
+          type: string
+          pattern: '^[\w-]{11}$'
+          description: ID YouTube (11 caractères)
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Code métier traduit par le front via `errors.<CODE>`
+          enum:
+            - VALIDATION_ERROR
+            - WEAK_PASSWORD
+            - EMAIL_TAKEN
+            - INVALID_CREDENTIALS
+            - UNAUTHORIZED
+            - TOKEN_EXPIRED
+            - VIDEO_NOT_FOUND
+            - PLAYLIST_NOT_FOUND
+            - PLAYLIST_NAME_TAKEN
+            - VIDEO_ALREADY_IN_PLAYLIST
+        message:
+          type: string
+          description: Destiné aux logs et au debug, pas à l'affichage
+    LegacyError:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
