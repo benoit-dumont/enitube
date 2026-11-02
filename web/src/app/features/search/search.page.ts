@@ -57,7 +57,31 @@ interface SearchRequest {
       @if (s.status === 'idle') {
         <p class="text-sm text-slate-600">Saisissez un mot-clé pour trouver une vidéo.</p>
       } @else if (s.status === 'loading') {
-        <p role="status" class="text-sm text-slate-600">Recherche en cours…</p>
+        <div role="status" aria-busy="true" class="skeleton-region">
+          <span class="sr-only">Recherche en cours…</span>
+          <ul
+            class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+            aria-hidden="true"
+          >
+            @for (card of skeletonCards; track card) {
+              <li
+                class="flex h-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"
+              >
+                <div class="skeleton aspect-video w-full"></div>
+                <div class="flex flex-1 flex-col gap-1 p-3">
+                  <div class="skeleton h-5 w-full rounded"></div>
+                  <div class="skeleton h-5 w-2/3 rounded"></div>
+                  <div class="skeleton h-4 w-1/2 rounded"></div>
+                  <div class="skeleton h-4 w-full rounded"></div>
+                  <div class="skeleton h-4 w-3/4 rounded"></div>
+                </div>
+                <div class="border-t border-slate-200 px-3 py-2">
+                  <div class="skeleton h-5 w-40 rounded"></div>
+                </div>
+              </li>
+            }
+          </ul>
+        </div>
       } @else if (s.status === 'error') {
         <div role="alert" class="max-w-2xl rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">
           <p>{{ s.message }}</p>
@@ -119,6 +143,8 @@ export class SearchPage {
   protected readonly loadMoreError = signal<string | null>(null);
   /** Vidéo en cours d'ajout à une playlist (modal ouverte tant qu'elle est définie). */
   protected readonly selected = signal<Video | null>(null);
+  /** Cartes du skeleton : une grille complète à la largeur xl (4 colonnes × 2 rangées). */
+  protected readonly skeletonCards = [1, 2, 3, 4, 5, 6, 7, 8];
 
   /** Relance explicite (réessayer, ou même recherche soumise deux fois) ou page suivante. */
   private readonly requests$ = new Subject<SearchRequest>();

@@ -30,7 +30,19 @@ const numberFormat = new Intl.NumberFormat('fr-FR');
   template: `
     @if (state(); as s) {
       @if (s.status === 'idle' || s.status === 'loading') {
-        <p role="status" class="text-sm text-slate-600">Chargement de la vidéo…</p>
+        <div role="status" aria-busy="true" class="skeleton-region max-w-4xl">
+          <span class="sr-only">Chargement de la vidéo…</span>
+          <div aria-hidden="true">
+            <div class="skeleton aspect-video w-full rounded-lg"></div>
+            <div class="skeleton mt-4 h-7 w-2/3 rounded"></div>
+            <div class="skeleton mt-1 h-5 w-1/3 rounded"></div>
+            <div class="mt-4 flex max-w-prose flex-col gap-1">
+              <div class="skeleton h-5 w-full rounded"></div>
+              <div class="skeleton h-5 w-full rounded"></div>
+              <div class="skeleton h-5 w-1/2 rounded"></div>
+            </div>
+          </div>
+        </div>
       } @else if (s.status === 'not-found') {
         <div role="alert" class="max-w-2xl rounded-md bg-slate-100 px-4 py-3 text-sm">
           <p class="font-semibold">Vidéo introuvable</p>
