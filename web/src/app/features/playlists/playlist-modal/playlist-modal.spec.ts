@@ -203,7 +203,8 @@ describe('PlaylistModal', () => {
     const others = [...el.querySelectorAll('button')].filter((b) =>
       /^\s*Ajouter/.test(b.textContent ?? ''),
     );
-    expect(others.every((b) => b.disabled)).toBe(true);
+    // aria-disabled (et non disabled) : le bouton garde le focus pendant l'appel.
+    expect(others.every((b) => b.getAttribute('aria-disabled') === 'true')).toBe(true);
     others[0].click();
     expect(addVideo).toHaveBeenCalledTimes(1);
   });
@@ -216,10 +217,50 @@ describe('PlaylistModal', () => {
     expect(host.closes()).toBe(1);
     (el.querySelector('button[aria-label="Fermer la fenêtre"]') as HTMLButtonElement).click();
     expect(host.closes()).toBe(2);
-    el.querySelector('[role=dialog]')?.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
-    );
+    // Échap ferme même si le focus n'est pas dans la modal (écoute au niveau du document).
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     fixture.detectChanges();
     expect(host.closes()).toBe(3);
+  });
+
+  it('Tab et Maj+Tab bouclent dans la modal', async () => {
+    const { el, fixture } = await setup({
+      list: vi.fn().mockReturnValue(of({ items: [playlist('1', 'Alpha')] })),
+    });
+    document.body.appendChild(el); // le focus réel exige un nœud attaché au document
+    const buttons = [
+      ...el.querySelectorAll<HTMLElement>('[role=dialog] button:not([tabindex="-1"])'),
+    ];
+    const first = el.querySelector<HTMLElement>('[role=dialog] button') as HTMLElement;
+    const last = buttons[buttons.length - 1];
+    const press = (shiftKey: boolean) => {
+      const ev = new KeyboardEvent('keydown', {
+        key: 'Tab',
+        shiftKey,
+        bubbles: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    };
+
+    last.focus();
+    expect(press(false)).toBe(true);
+    expect(document.activeElement).toBe(first);
+    expect(press(true)).toBe(true);
+    expect(document.activeElement).toBe(last);
+
+    // Focus échappé (ex. bouton devenu inactif) : Tab le ramène à l'intérieur.
+    (document.activeElement as HTMLElement).blur();
+    expect(press(false)).toBe(true);
+    expect(el.querySelector('[role=dialog]')?.contains(document.activeElement)).toBe(true);
+    fixture.destroy();
+  });
+
+  it('le chargement est un skeleton annoncé, avec libellé pour les lecteurs d’écran', async () => {
+    const { el } = await setup({ list: vi.fn().mockReturnValue(NEVER) });
+    const region = el.querySelector('[role=status][aria-busy=true]');
+    expect(region?.querySelectorAll('.skeleton').length).toBeGreaterThan(0);
+    expect(region?.querySelector('.sr-only')?.textContent).toContain('Chargement');
   });
 });

@@ -15,6 +15,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { Playlist, Video } from '@enitube/shared';
 import { mapPlaylistError } from '../playlist-errors';
 import type { LoadState } from '../../../models/load-state';
+import { FocusTrap } from '../../../shared/focus-trap';
 import { PlaylistService } from '../../../services/playlist.service';
 import { isAlreadyInPlaylist, mapAddVideoError } from './add-video-errors';
 
@@ -34,19 +35,22 @@ const BTN =
 /**
  * Modal « Ajouter à une playlist » : liste les playlists de l'utilisateur, permet d'y ajouter
  * la vidéo, ou d'en créer une à la volée (création puis ajout enchaînés).
- * Le focus trap complet est prévu dans `feat/web-polish`.
+ * Focus piégé (FocusTrap), Échap ferme depuis n'importe où, le focus revient sur le déclencheur.
  */
 @Component({
   selector: 'app-playlist-modal',
+  imports: [FocusTrap],
+  host: { '(document:keydown.escape)': 'requestClose()' },
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
+        #overlay
         type="button"
         tabindex="-1"
         aria-label="Fermer la fenêtre"
-        class="absolute inset-0 cursor-default bg-black/50"
-        (click)="closed.emit()"
+        class="animate-overlay-in absolute inset-0 cursor-default bg-black/50 backdrop-blur-[2px]"
+        (click)="requestClose()"
       ></button>
 
       <div
@@ -55,8 +59,8 @@ const BTN =
         aria-modal="true"
         aria-labelledby="playlist-modal-title"
         tabindex="-1"
-        class="relative flex max-h-full w-full max-w-md flex-col rounded-lg bg-white shadow-xl focus-visible:outline-none"
-        (keydown.escape)="closed.emit()"
+        appFocusTrap
+        class="animate-dialog-in relative flex max-h-full w-full max-w-md flex-col rounded-2xl bg-white shadow-xl focus-visible:outline-none"
       >
         <header class="border-b border-slate-200 p-4">
           <h2 id="playlist-modal-title" class="text-lg font-semibold">Ajouter à une playlist</h2>
@@ -66,7 +70,20 @@ const BTN =
         <div class="min-h-0 flex-1 overflow-y-auto p-4">
           @if (state(); as s) {
             @if (s.status === 'idle' || s.status === 'loading') {
-              <p role="status" class="text-sm text-slate-600">Chargement de vos playlists…</p>
+              <div role="status" aria-busy="true" class="skeleton-region">
+                <span class="sr-only">Chargement de vos playlists…</span>
+                <ul class="flex flex-col divide-y divide-slate-200" aria-hidden="true">
+                  @for (row of skeletonRows; track row) {
+                    <li class="flex items-center justify-between gap-3 py-2">
+                      <div class="flex flex-col gap-1">
+                        <div class="skeleton h-5 w-32 rounded"></div>
+                        <div class="skeleton h-4 w-16 rounded"></div>
+                      </div>
+                      <div class="skeleton h-8 w-20 rounded-md"></div>
+                    </li>
+                  }
+                </ul>
+              </div>
             } @else if (s.status === 'error') {
               <div role="alert" class="rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">
                 <p>{{ s.message }}</p>
@@ -99,8 +116,9 @@ const BTN =
                     } @else {
                       <button
                         type="button"
-                        [disabled]="busy()"
-                        class="shrink-0 bg-red-600 text-white hover:bg-red-700 ${BTN}"
+                        [attr.aria-disabled]="busy() ? 'true' : null"
+                        [attr.aria-busy]="pendingId() === playlist.id ? 'true' : null"
+                        class="shrink-0 bg-red-600 text-white hover:bg-red-700 aria-disabled:cursor-wait ${BTN}"
                         (click)="add(playlist)"
                       >
                         {{ pendingId() === playlist.id ? 'Ajout…' : 'Ajouter' }}
@@ -147,8 +165,9 @@ const BTN =
             />
             <button
               type="submit"
-              [disabled]="busy()"
-              class="border border-slate-300 hover:bg-slate-100 ${BTN}"
+              [attr.aria-disabled]="busy() ? 'true' : null"
+              [attr.aria-busy]="creating() ? 'true' : null"
+              class="border border-slate-300 hover:bg-slate-100 aria-disabled:cursor-wait ${BTN}"
             >
               {{ creating() ? 'Création…' : 'Créer et ajouter' }}
             </button>
@@ -164,7 +183,7 @@ const BTN =
           <button
             type="button"
             class="border border-slate-300 hover:bg-slate-100 ${BTN}"
-            (click)="closed.emit()"
+            (click)="requestClose()"
           >
             Fermer
           </button>
@@ -180,6 +199,9 @@ export class PlaylistModal {
   private readonly playlists = inject(PlaylistService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly panel = viewChild.required<ElementRef<HTMLElement>>('panel');
+  private readonly overlay = viewChild.required<ElementRef<HTMLElement>>('overlay');
+  private closing = false;
+  private closeFallback: ReturnType<typeof setTimeout> | undefined;
 
   protected readonly state = signal<LoadState<Playlist[]>>({ status: 'idle' });
   /** Playlist dont l'ajout est en cours. */
@@ -187,15 +209,50 @@ export class PlaylistModal {
   protected readonly creating = signal(false);
   protected readonly createError = signal<string | null>(null);
   protected readonly feedback = signal<Feedback | null>(null);
+  /** Lignes du skeleton de chargement (même gabarit que les vraies lignes). */
+  protected readonly skeletonRows = [1, 2, 3];
 
   constructor() {
     // Le focus entre dans la modal à l'ouverture et revient sur le déclencheur à la fermeture.
     const doc = inject(DOCUMENT);
     const opener = doc.activeElement instanceof HTMLElement ? doc.activeElement : null;
     afterNextRender(() => this.panel().nativeElement.focus());
-    this.destroyRef.onDestroy(() => opener?.focus());
+    this.destroyRef.onDestroy(() => {
+      clearTimeout(this.closeFallback);
+      opener?.focus();
+    });
 
     this.load();
+  }
+
+  /**
+   * Fermeture avec sortie animée (~150 ms, ease-in) : le parent détruit la modal dès que
+   * `closed` est émis, donc on émet une fois l'animation terminée. Sans animation (styles
+   * absents, mouvement réduit à 1 ms) la fermeture est immédiate.
+   */
+  protected requestClose(): void {
+    if (this.closing) return;
+    const panel = this.panel().nativeElement;
+    const overlay = this.overlay().nativeElement;
+
+    panel.classList.replace('animate-dialog-in', 'animate-dialog-out');
+    overlay.classList.replace('animate-overlay-in', 'animate-overlay-out');
+
+    const name = getComputedStyle(panel).animationName;
+    if (!name || name === 'none') {
+      this.closed.emit();
+      return;
+    }
+
+    this.closing = true;
+    const finish = () => {
+      if (!this.closing) return;
+      this.closing = false;
+      clearTimeout(this.closeFallback);
+      this.closed.emit();
+    };
+    panel.addEventListener('animationend', finish, { once: true });
+    this.closeFallback = setTimeout(finish, 400); // filet : onglet masqué, animationend perdu
   }
 
   /** Anti double-clic : un seul appel d'écriture à la fois. */
