@@ -6,7 +6,9 @@ import {
   Observable,
   Subject,
   catchError,
+  debounceTime,
   distinctUntilChanged,
+  filter,
   finalize,
   map,
   merge,
@@ -19,6 +21,11 @@ import { PlaylistModal } from '../playlists/playlist-modal/playlist-modal';
 import { VideoService } from '../../services/video.service';
 import { mapSearchError } from './search-errors';
 import { VideoCard } from './video-card';
+
+/** Pause de frappe avant de lancer la recherche (Entrée, lui, est immédiat). */
+export const SEARCH_DEBOUNCE_MS = 400;
+/** En dessous, on n'interroge pas : chaque recherche YouTube coûte 100 unités de quota. */
+export const SEARCH_MIN_CHARS = 2;
 
 interface SearchRequest {
   q: string;
@@ -39,7 +46,8 @@ interface SearchRequest {
         #box
         id="search-input"
         type="search"
-        [value]="query()"
+        [value]="draft()"
+        (input)="onInput(box.value)"
         maxlength="100"
         placeholder="Rechercher une vidéo…"
         autocomplete="off"
@@ -95,18 +103,25 @@ interface SearchRequest {
         </div>
       } @else if (s.data.items.length === 0) {
         <p role="status" class="text-sm text-slate-600">
-          Aucune vidéo trouvée pour « {{ query() }} ». Essayez d'autres mots-clés.
+          Aucune vidéo trouvée pour « {{ resultsQuery() }} ». Essayez d'autres mots-clés.
         </p>
       } @else {
-        <p role="status" class="mb-4 text-sm text-slate-600">
-          {{ s.data.items.length }} vidéo{{ s.data.items.length > 1 ? 's' : '' }} pour «
-          {{ query() }} »
-        </p>
-        <ul class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          @for (video of s.data.items; track video.id) {
-            <li><app-video-card [video]="video" (addToPlaylist)="selected.set($event)" /></li>
-          }
-        </ul>
+        <!-- Pendant une nouvelle recherche, les résultats précédents restent affichés (atténués). -->
+        <div
+          class="transition-opacity duration-100"
+          [class.opacity-60]="refreshing()"
+          [attr.aria-busy]="refreshing() ? 'true' : null"
+        >
+          <p role="status" class="mb-4 text-sm text-slate-600">
+            {{ s.data.items.length }} vidéo{{ s.data.items.length > 1 ? 's' : '' }} pour «
+            {{ resultsQuery() }} »
+          </p>
+          <ul class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            @for (video of s.data.items; track video.id) {
+              <li><app-video-card [video]="video" (addToPlaylist)="selected.set($event)" /></li>
+            }
+          </ul>
+        </div>
 
         @if (s.data.nextPageToken; as token) {
           <div class="mt-8 flex flex-col items-center gap-2">
@@ -138,6 +153,12 @@ export class SearchPage {
 
   /** Terme actuellement affiché ; l'URL (`?q=`) en est la source de vérité. */
   protected readonly query = signal('');
+  /** Contenu du champ : suit la frappe, et l'URL seulement si elle change ailleurs (retour arrière). */
+  protected readonly draft = signal('');
+  /** Terme des résultats affichés : peut retarder sur `query()` pendant qu'une recherche charge. */
+  protected readonly resultsQuery = signal('');
+  /** Nouvelle recherche en cours alors que des résultats sont déjà à l'écran. */
+  protected readonly refreshing = signal(false);
   protected readonly state = signal<LoadState<VideoSearchResponse>>({ status: 'idle' });
   protected readonly loadingMore = signal(false);
   protected readonly loadMoreError = signal<string | null>(null);
@@ -148,11 +169,15 @@ export class SearchPage {
 
   /** Relance explicite (réessayer, ou même recherche soumise deux fois) ou page suivante. */
   private readonly requests$ = new Subject<SearchRequest>();
+  private readonly typed$ = new Subject<string>();
 
   constructor() {
     const fromUrl$ = this.route.queryParamMap.pipe(
       map((params) => params.get('q')?.trim() ?? ''),
       distinctUntilChanged(),
+      tap((q) => {
+        if (q !== this.draft().trim()) this.draft.set(q);
+      }),
       map((q): SearchRequest => ({ q })),
     );
 
@@ -163,6 +188,25 @@ export class SearchPage {
         takeUntilDestroyed(),
       )
       .subscribe();
+
+    // Recherche à la frappe : l'URL reste la source de vérité, sans empiler l'historique.
+    this.typed$
+      .pipe(
+        map((value) => value.trim()),
+        debounceTime(SEARCH_DEBOUNCE_MS),
+        distinctUntilChanged(),
+        filter((q) => q === '' || q.length >= SEARCH_MIN_CHARS), // champ vidé : retour à l'état initial
+        filter((q) => q !== this.query()),
+        takeUntilDestroyed(),
+      )
+      .subscribe((q) => {
+        void this.router.navigate([], { queryParams: { q: q || null }, replaceUrl: true });
+      });
+  }
+
+  protected onInput(value: string): void {
+    this.draft.set(value);
+    this.typed$.next(value);
   }
 
   protected submit(value: string, event: Event): void {
@@ -190,16 +234,20 @@ export class SearchPage {
 
     if (!q) {
       this.query.set('');
+      this.refreshing.set(false);
       this.state.set({ status: 'idle' });
       return EMPTY;
     }
 
     this.query.set(q);
     if (pageToken) this.loadingMore.set(true);
+    else if (this.state().status === 'success')
+      this.refreshing.set(true); // on garde l'écran stable
     else this.state.set({ status: 'loading' });
 
     return this.videos.search(q, pageToken).pipe(
-      tap((res) =>
+      tap((res) => {
+        this.resultsQuery.set(q);
         this.state.update((current) =>
           pageToken && current.status === 'success'
             ? {
@@ -210,8 +258,8 @@ export class SearchPage {
                 },
               }
             : { status: 'success', data: res },
-        ),
-      ),
+        );
+      }),
       catchError((error: unknown) => {
         const message = mapSearchError(error);
         // Échec d'une page suivante : on garde les résultats déjà affichés.
@@ -219,7 +267,10 @@ export class SearchPage {
         else this.state.set({ status: 'error', message });
         return EMPTY;
       }),
-      finalize(() => this.loadingMore.set(false)),
+      finalize(() => {
+        this.loadingMore.set(false);
+        this.refreshing.set(false);
+      }),
     );
   }
 }
